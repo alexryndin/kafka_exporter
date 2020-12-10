@@ -45,6 +45,7 @@ var (
 	consumergroupLagSum                *prometheus.Desc
 	consumergroupLagZookeeper          *prometheus.Desc
 	consumergroupMembers               *prometheus.Desc
+	consumergroupLagK8S                *prometheus.Desc
 )
 
 // Exporter collects Kafka stats from the given server and exports them using
@@ -231,6 +232,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- consumergroupLag
 	ch <- consumergroupLagZookeeper
 	ch <- consumergroupLagSum
+	ch <- consumergroupLagK8S
 }
 
 // Collect fetches the stats from configured Kafka location and delivers them
@@ -449,6 +451,9 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 								ch <- prometheus.MustNewConstMetric(
 									consumergroupLag, prometheus.GaugeValue, float64(lag), group.GroupId, topic, strconv.FormatInt(int64(partition), 10),
 								)
+								ch <- prometheus.MustNewConstMetric(
+									consumergroupLagK8S, prometheus.GaugeValue, float64(lag), escapeK8S(group.GroupId), escapeK8S(topic), strconv.FormatInt(int64(partition), 10),
+								)
 							} else {
 								plog.Errorf("No offset of topic %s partition %d, cannot get consumer group lag", topic, partition)
 							}
@@ -475,6 +480,22 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	} else {
 		plog.Errorln("No valid broker, cannot get consumer group metrics")
 	}
+}
+
+func isValidK8SSymbol(b byte) bool {
+	return ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') || ('0' <= b && b <= '9') || b == '-'
+}
+
+func escapeK8S(s string) string {
+	buf := make([]byte, len(s))
+	copy(buf, s)
+
+	for i := 0; i < len(buf); i++ {
+		if !isValidK8SSymbol(buf[i]) {
+			buf[i] = '-'
+		}
+	}
+	return string(buf)
 }
 
 func init() {
@@ -608,6 +629,12 @@ func main() {
 		prometheus.BuildFQName(namespace, "consumergroup", "lag_sum"),
 		"Current Approximate Lag of a ConsumerGroup at Topic for all partitions",
 		[]string{"consumergroup", "topic"}, labels,
+	)
+
+	consumergroupLagK8S = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "consumergroup", "lag_k8s"),
+		"Current Approximate Lag of a ConsumerGroup at Topic/Partition with labels escaped to be usable with prometheus-adapter",
+		[]string{"consumergroup", "topic", "partition"}, nil,
 	)
 
 	consumergroupMembers = prometheus.NewDesc(
